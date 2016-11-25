@@ -21,15 +21,37 @@
 #include "copyright.h"
 #include "scheduler.h"
 #include "system.h"
+#include <time.h>
 
 //----------------------------------------------------------------------
 // Scheduler::Scheduler
 // 	Initialize the list of ready but not running threads to empty.
 //----------------------------------------------------------------------
 
+#define MAX_THREAD_TIME 100
+#define INIT_THREAD_TIME 200
+
+int counter = 1;
+int threadId = 0;
+//char* threadIdChar;
+int startTime;
+int endTime;
+int lastRecordedTime;
+//clock_t startTime;
+//clock_t endTime;
+//clock_t lastRecordedTime;
+bool firstThreadHasStarted = false;
+
 Scheduler::Scheduler()
-{ 
+{
+    int i;
+    for (i = 0; i < 50; ++i)
+    {
+        timesOfThreads[i] = INIT_THREAD_TIME * 1.0;        // INIT_THREAD_TIME means no time estimation is available yet.
+    }
     readyList = new List; 
+    waiting = 0;
+    runningThreadId = 0;
 } 
 
 //----------------------------------------------------------------------
@@ -38,7 +60,7 @@ Scheduler::Scheduler()
 //----------------------------------------------------------------------
 
 Scheduler::~Scheduler()
-{ 
+{
     delete readyList; 
 } 
 
@@ -57,6 +79,7 @@ Scheduler::ReadyToRun (Thread *thread)
 
     thread->setStatus(READY);
     readyList->Append((void *)thread);
+    waiting++;
 }
 
 //----------------------------------------------------------------------
@@ -70,7 +93,77 @@ Scheduler::ReadyToRun (Thread *thread)
 Thread *
 Scheduler::FindNextToRun ()
 {
-    return (Thread *)readyList->Remove();
+    if (firstThreadHasStarted){
+        //endTime = clock();
+        endTime = time(NULL);
+        //printf("endTime is %f\n", (double) endTime);
+        //double elapsed = (double)(endTime - lastRecordedTime)/ CLOCKS_PER_SEC;    //elapsed has the time of the thread has been running
+        double elapsed = (double)(endTime - lastRecordedTime);
+        //printf("***** %f %d %d\n",timesOfThreads[runningThreadId], INIT_THREAD_TIME, runningThreadId);
+        if (timesOfThreads[runningThreadId] > 100.0){
+
+            timesOfThreads[runningThreadId] = elapsed;
+            //printf("elapsed is %f and timesOfThreads[threadId] is %f \n",elapsed , timesOfThreads[runningThreadId] );
+        } else {
+            timesOfThreads[runningThreadId] = (elapsed + timesOfThreads[runningThreadId])/2.0;
+            //printf(">> elapsed is %f and timesOfThreads[threadId] is %f \n",elapsed , timesOfThreads[runningThreadId] );
+        }
+    }
+    printf("-tt %f %f %f %f %f %f %f %f %f %f \n", timesOfThreads[1], timesOfThreads[2], timesOfThreads[3], timesOfThreads[4], timesOfThreads[5], timesOfThreads[6], timesOfThreads[7], timesOfThreads[8], timesOfThreads[9], timesOfThreads[10]);
+
+    double minTime = MAX_THREAD_TIME;       // supposing that no thread lasts more than MAX_THREAD_TIME.
+    Thread* shortestThread = NULL;
+    Thread* tempThread = NULL;
+    bool newThreadExists = false;
+    //Thread* resultThread = NULL;
+    int i ;
+    for(i = 0; i < waiting; i++){
+
+        tempThread = (Thread *) readyList->Remove();
+        int threadId = atoi(tempThread->getName());
+        //printf("time of thread %f , thread id %s \n", timesOfThreads[threadId] , tempThread->getName());
+
+        if (timesOfThreads[threadId] > MAX_THREAD_TIME){
+            newThreadExists = true;
+        } else if(timesOfThreads[threadId] < minTime) {
+            minTime = timesOfThreads[threadId];
+            shortestThread = tempThread;
+        }
+        readyList->Append(tempThread);
+    }
+
+    printf("-ww %d threads are waiting!\n", waiting);
+
+    
+    // return (Thread *)readyList->Remove();
+    if (newThreadExists){
+
+        shortestThread = (Thread *) readyList->Remove();
+
+    } else {
+
+        printf("-ss shortest thread found!\n");
+
+        for(i = 0; i < waiting; i++){
+
+            tempThread = (Thread *) readyList->Remove();
+            int threadId = atoi(tempThread->getName());
+
+            if (timesOfThreads[threadId] != minTime){
+                readyList->Append(tempThread);
+            }else{
+                shortestThread = tempThread;
+            }
+        }
+    }
+    waiting--;
+
+    runningThreadId = atoi(shortestThread->getName());
+    lastRecordedTime = time(NULL);
+
+    printf("--> granting cpu to thread %d.\n", runningThreadId);
+
+    return shortestThread;
 }
 
 //----------------------------------------------------------------------
@@ -88,8 +181,13 @@ Scheduler::FindNextToRun ()
 //----------------------------------------------------------------------
 
 void
-Scheduler::Run (Thread *nextThread)
-{
+Scheduler::Run (Thread *nextThread){
+    firstThreadHasStarted = true;
+
+    //startTime = clock();
+    // printf("startTime is %f\n", (double) startTime);
+
+
     Thread *oldThread = currentThread;
     
 #ifdef USER_PROGRAM			// ignore until running user programs 
@@ -98,15 +196,16 @@ Scheduler::Run (Thread *nextThread)
 	currentThread->space->SaveState();
     }
 #endif
-    
+
     oldThread->CheckOverflow();		    // check if the old thread
 					    // had an undetected stack overflow
 
     currentThread = nextThread;		    // switch to the next thread
     currentThread->setStatus(RUNNING);      // nextThread is now running
     
-    DEBUG('t', "Switching from thread \"%s\" to thread \"%s\"\n",
-	  oldThread->getName(), nextThread->getName());
+   //  DEBUG('t', "Switching from thread \"%s\" to thread \"%s\"\n",
+	  // oldThread->getName(), nextThread->getName());
+    // printf("  Switching from thread \"%s\" to thread \"%s\"\n",oldThread->getName(), nextThread->getName());
     
     // This is a machine-dependent assembly language routine defined 
     // in switch.s.  You may have to think
@@ -116,7 +215,7 @@ Scheduler::Run (Thread *nextThread)
     SWITCH(oldThread, nextThread);
     
     DEBUG('t', "Now in thread \"%s\"\n", currentThread->getName());
-
+    // printf("!!! Now in thread \"%s\"\n", currentThread->getName());
     // If the old thread gave up the processor because it was finishing,
     // we need to delete its carcass.  Note we cannot delete the thread
     // before now (for example, in Thread::Finish()), because up to this
@@ -132,6 +231,7 @@ Scheduler::Run (Thread *nextThread)
 	currentThread->space->RestoreState();
     }
 #endif
+
 }
 
 //----------------------------------------------------------------------

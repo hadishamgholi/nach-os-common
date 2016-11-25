@@ -31,6 +31,13 @@ class Scheduler {
   private:
     List *readyList;  		// queue of threads that are ready to run,
 				// but not running
+    int waiting;          // keeps size of readyList.
+
+    double timesOfThreads[50];
+    //double startOfThreads[50];
+
+    int runningThreadId;
+    
 };
 
 #endif // SCHEDULER_H
